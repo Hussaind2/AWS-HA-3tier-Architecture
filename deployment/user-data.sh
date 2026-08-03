@@ -1,0 +1,107 @@
+#!/bin/bash
+set -Eeuo pipefail
+
+RELEASE="cloudserve-v7-final"
+LOG_FILE="/var/log/cloudserve-bootstrap.log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+trap 'echo "Bootstrap failed at line $LINENO for release $RELEASE" >&2' ERR
+
+AWS_REGION="<AWS_REGION>"
+SECRET_ARN="<SECRET_ARN>"
+DB_HOST="<RDS_ENDPOINT>"
+DB_PORT="5432"
+DB_NAME="cloudserve"
+
+echo "Starting CloudServe bootstrap: $RELEASE"
+
+dnf install -y python3.11 python3.11-pip
+
+id cloudserve >/dev/null 2>&1 || useradd --system --home-dir /opt/cloudserve --shell /sbin/nologin cloudserve
+
+install -d -o cloudserve -g cloudserve -m 0750 /opt/cloudserve
+install -d -o root -g cloudserve -m 0750 /etc/cloudserve
+
+cat > /etc/cloudserve/cloudserve.env <<EOF
+APP_RELEASE=$RELEASE
+AWS_REGION=$AWS_REGION
+SECRET_ARN=$SECRET_ARN
+DB_HOST=$DB_HOST
+DB_PORT=$DB_PORT
+DB_NAME=$DB_NAME
+LOG_LEVEL=INFO
+EOF
+
+chown root:cloudserve /etc/cloudserve/cloudserve.env
+chmod 0640 /etc/cloudserve/cloudserve.env
+
+python3.11 -m venv /opt/cloudserve/venv
+/opt/cloudserve/venv/bin/python -m pip install --upgrade pip
+/opt/cloudserve/venv/bin/pip install \
+  "Flask>=3.0,<4.0" \
+  "gunicorn>=22.0,<24.0" \
+  "boto3>=1.34,<2.0" \
+  "psycopg2-binary>=2.9,<3.0"
+
+cat > /tmp/cloudserve-app.b64 <<'APP_B64'
+aW1wb3J0IGpzb24KaW1wb3J0IGxvZ2dpbmcKaW1wb3J0IG9zCmZyb20gZnVuY3Rvb2xzIGltcG9ydCBscnVfY2FjaGUKZnJvbSB0eXBpbmcgaW1wb3J0IEFueQoKaW1wb3J0IGJvdG8zCmltcG9ydCBwc3ljb3BnMgpmcm9tIGJvdG9jb3JlLmV4Y2VwdGlvbnMgaW1wb3J0IEJvdG9Db3JlRXJyb3IsIENsaWVudEVycm9yCmZyb20gZmxhc2sgaW1wb3J0IEZsYXNrLCBqc29uaWZ5CgpBUFBfUkVMRUFTRSA9IG9zLmdldGVudigiQVBQX1JFTEVBU0UiLCAiY2xvdWRzZXJ2ZS12Ny1maW5hbCIpCkFXU19SRUdJT04gPSBvcy5nZXRlbnYoIkFXU19SRUdJT04iLCAidXMtZWFzdC0xIikKU0VDUkVUX0FSTiA9IG9zLmdldGVudigiU0VDUkVUX0FSTiIsICIiKQpEQl9IT1NUID0gb3MuZ2V0ZW52KCJEQl9IT1NUIiwgIiIpCkRCX1BPUlQgPSBpbnQob3MuZ2V0ZW52KCJEQl9QT1JUIiwgIjU0MzIiKSkKREJfTkFNRSA9IG9zLmdldGVudigiREJfTkFNRSIsICJjbG91ZHNlcnZlIikKCmxvZ2dpbmcuYmFzaWNDb25maWcoCiAgICBsZXZlbD1vcy5nZXRlbnYoIkxPR19MRVZFTCIsICJJTkZPIikudXBwZXIoKSwKICAgIGZvcm1hdD0iJShhc2N0aW1lKXMgJShsZXZlbG5hbWUpcyAlKG5hbWUpcyAlKG1lc3NhZ2UpcyIsCikKbG9nZ2VyID0gbG9nZ2luZy5nZXRMb2dnZXIoImNsb3Vkc2VydmUiKQoKYXBwID0gRmxhc2soX19uYW1lX18pCgoKQGxydV9jYWNoZShtYXhzaXplPTEpCmRlZiBnZXRfZGF0YWJhc2VfY3JlZGVudGlhbHMoKSAtPiBkaWN0W3N0ciwgQW55XToKICAgIGlmIG5vdCBTRUNSRVRfQVJOOgogICAgICAgIHJhaXNlIFJ1bnRpbWVFcnJvcigiU0VDUkVUX0FSTiBpcyBub3QgY29uZmlndXJlZCIpCgogICAgY2xpZW50ID0gYm90bzMuY2xpZW50KCJzZWNyZXRzbWFuYWdlciIsIHJlZ2lvbl9uYW1lPUFXU19SRUdJT04pCiAgICByZXNwb25zZSA9IGNsaWVudC5nZXRfc2VjcmV0X3ZhbHVlKFNlY3JldElkPVNFQ1JFVF9BUk4pCgogICAgc2VjcmV0X3RleHQgPSByZXNwb25zZS5nZXQoIlNlY3JldFN0cmluZyIpCiAgICBpZiBub3Qgc2VjcmV0X3RleHQ6CiAgICAgICAgcmFpc2UgUnVudGltZUVycm9yKCJUaGUgY29uZmlndXJlZCBzZWNyZXQgZG9lcyBub3QgY29udGFpbiBTZWNyZXRTdHJpbmciKQoKICAgIHNlY3JldCA9IGpzb24ubG9hZHMoc2VjcmV0X3RleHQpCiAgICB1c2VybmFtZSA9IHNlY3JldC5nZXQoInVzZXJuYW1lIikKICAgIHBhc3N3b3JkID0gc2VjcmV0LmdldCgicGFzc3dvcmQiKQoKICAgIGlmIG5vdCB1c2VybmFtZSBvciBub3QgcGFzc3dvcmQ6CiAgICAgICAgcmFpc2UgUnVudGltZUVycm9yKCJUaGUgY29uZmlndXJlZCBzZWNyZXQgaXMgbWlzc2luZyB1c2VybmFtZSBvciBwYXNzd29yZCIpCgogICAgcmV0dXJuIHsidXNlcm5hbWUiOiB1c2VybmFtZSwgInBhc3N3b3JkIjogcGFzc3dvcmR9CgoKZGVmIG9wZW5fZGF0YWJhc2VfY29ubmVjdGlvbigpOgogICAgaWYgbm90IERCX0hPU1Q6CiAgICAgICAgcmFpc2UgUnVudGltZUVycm9yKCJEQl9IT1NUIGlzIG5vdCBjb25maWd1cmVkIikKCiAgICBjcmVkZW50aWFscyA9IGdldF9kYXRhYmFzZV9jcmVkZW50aWFscygpCgogICAgcmV0dXJuIHBzeWNvcGcyLmNvbm5lY3QoCiAgICAgICAgaG9zdD1EQl9IT1NULAogICAgICAgIHBvcnQ9REJfUE9SVCwKICAgICAgICBkYm5hbWU9REJfTkFNRSwKICAgICAgICB1c2VyPWNyZWRlbnRpYWxzWyJ1c2VybmFtZSJdLAogICAgICAgIHBhc3N3b3JkPWNyZWRlbnRpYWxzWyJwYXNzd29yZCJdLAogICAgICAgIGNvbm5lY3RfdGltZW91dD0zLAogICAgICAgIHNzbG1vZGU9InJlcXVpcmUiLAogICAgKQoKCkBhcHAuZ2V0KCIvIikKZGVmIGluZGV4KCk6CiAgICByZXR1cm4ganNvbmlmeSgKICAgICAgICB7CiAgICAgICAgICAgICJhcHBsaWNhdGlvbiI6ICJDbG91ZFNlcnZlIiwKICAgICAgICAgICAgInJlbGVhc2UiOiBBUFBfUkVMRUFTRSwKICAgICAgICAgICAgIm1lc3NhZ2UiOiAiQ3VzdG9tZXIgT3JkZXIgYW5kIFN1cHBvcnQgUG9ydGFsIiwKICAgICAgICAgICAgInN0YXR1cyI6ICJydW5uaW5nIiwKICAgICAgICB9CiAgICApCgoKQGFwcC5nZXQoIi9oZWFsdGgiKQpkZWYgaGVhbHRoKCk6CiAgICByZXR1cm4ganNvbmlmeSgKICAgICAgICB7CiAgICAgICAgICAgICJzZXJ2aWNlIjogImNsb3Vkc2VydmUiLAogICAgICAgICAgICAicmVsZWFzZSI6IEFQUF9SRUxFQVNFLAogICAgICAgICAgICAic3RhdHVzIjogImhlYWx0aHkiLAogICAgICAgIH0KICAgICkKCgpAYXBwLmdldCgiL2RiLWhlYWx0aCIpCmRlZiBkYXRhYmFzZV9oZWFsdGgoKToKICAgIGNvbm5lY3Rpb24gPSBOb25lCiAgICB0cnk6CiAgICAgICAgY29ubmVjdGlvbiA9IG9wZW5fZGF0YWJhc2VfY29ubmVjdGlvbigpCiAgICAgICAgd2l0aCBjb25uZWN0aW9uLmN1cnNvcigpIGFzIGN1cnNvcjoKICAgICAgICAgICAgY3Vyc29yLmV4ZWN1dGUoIlNFTEVDVCAxOyIpCiAgICAgICAgICAgIHJlc3VsdCA9IGN1cnNvci5mZXRjaG9uZSgpCgogICAgICAgIGlmIG5vdCByZXN1bHQgb3IgcmVzdWx0WzBdICE9IDE6CiAgICAgICAgICAgIHJhaXNlIFJ1bnRpbWVFcnJvcigiVW5leHBlY3RlZCBkYXRhYmFzZSB2YWxpZGF0aW9uIHJlc3VsdCIpCgogICAgICAgIHJldHVybiBqc29uaWZ5KHsiZGF0YWJhc2UiOiAiY29ubmVjdGVkIiwgInN0YXR1cyI6ICJoZWFsdGh5In0pCiAgICBleGNlcHQgKFJ1bnRpbWVFcnJvciwgVmFsdWVFcnJvciwganNvbi5KU09ORGVjb2RlRXJyb3IsIEJvdG9Db3JlRXJyb3IsIENsaWVudEVycm9yLCBwc3ljb3BnMi5FcnJvcikgYXMgZXhjOgogICAgICAgIGxvZ2dlci5leGNlcHRpb24oIkRhdGFiYXNlIGhlYWx0aCBjaGVjayBmYWlsZWQ6ICVzIiwgZXhjKQogICAgICAgIHJldHVybiBqc29uaWZ5KHsiZGF0YWJhc2UiOiAidW5hdmFpbGFibGUiLCAic3RhdHVzIjogInVuaGVhbHRoeSJ9KSwgNTAzCiAgICBmaW5hbGx5OgogICAgICAgIGlmIGNvbm5lY3Rpb24gaXMgbm90IE5vbmU6CiAgICAgICAgICAgIGNvbm5lY3Rpb24uY2xvc2UoKQoKCkBhcHAuZXJyb3JoYW5kbGVyKDQwNCkKZGVmIG5vdF9mb3VuZChfZXJyb3IpOgogICAgcmV0dXJuIGpzb25pZnkoeyJlcnJvciI6ICJub3RfZm91bmQiLCAic3RhdHVzIjogNDA0fSksIDQwNAoKCkBhcHAuZXJyb3JoYW5kbGVyKDUwMCkKZGVmIGludGVybmFsX2Vycm9yKF9lcnJvcik6CiAgICByZXR1cm4ganNvbmlmeSh7ImVycm9yIjogImludGVybmFsX3NlcnZlcl9lcnJvciIsICJzdGF0dXMiOiA1MDB9KSwgNTAwCg==
+APP_B64
+
+base64 --decode /tmp/cloudserve-app.b64 > /opt/cloudserve/app.py
+rm -f /tmp/cloudserve-app.b64
+
+chown -R cloudserve:cloudserve /opt/cloudserve
+chmod 0640 /opt/cloudserve/app.py
+
+sudo -u cloudserve /opt/cloudserve/venv/bin/python -m py_compile /opt/cloudserve/app.py
+echo "CloudServe Python syntax validation succeeded."
+
+sudo -u cloudserve bash -lc '
+  set -a
+  source /etc/cloudserve/cloudserve.env
+  set +a
+  cd /opt/cloudserve
+  /opt/cloudserve/venv/bin/python -c "import app"
+'
+echo "CloudServe import validation succeeded."
+
+cat > /etc/systemd/system/cloudserve.service <<'SERVICE'
+[Unit]
+Description=CloudServe Flask application
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cloudserve
+Group=cloudserve
+WorkingDirectory=/opt/cloudserve
+EnvironmentFile=/etc/cloudserve/cloudserve.env
+ExecStart=/opt/cloudserve/venv/bin/gunicorn --workers 2 --threads 2 --timeout 30 --bind 0.0.0.0:8000 --access-logfile - --error-logfile - app:app
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+systemctl daemon-reload
+systemctl enable --now cloudserve
+
+for attempt in $(seq 1 30); do
+  if curl --fail --silent http://127.0.0.1:8000/health >/dev/null; then
+    echo "CloudServe local health check succeeded."
+    echo "CloudServe bootstrap completed successfully: $RELEASE"
+    exit 0
+  fi
+
+  echo "Health check attempt $attempt of 30 failed; retrying."
+  sleep 5
+done
+
+systemctl status cloudserve --no-pager -l || true
+journalctl -u cloudserve -n 100 --no-pager || true
+echo "CloudServe did not become healthy within the expected time." >&2
+exit 1

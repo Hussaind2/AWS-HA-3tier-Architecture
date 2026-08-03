@@ -94,7 +94,19 @@ A summary of the main challenges, solutions and improvements is available in:
 - Add automated deployment through a CI/CD pipeline.
 - Improve monitoring and alerting.
 - Perform additional resilience and failure-recovery testing.
+## Repository Structure
 
+- [`docs/`](docs/) — Architecture diagram, implementation guide and lessons learned.
+- [`screenshots/`](screenshots/) — Selected implementation and validation evidence.
+- [`deployment/`](deployment/) — Sanitised EC2 User Data deployment script.
+- [`tests/`](tests/) — Validation scope and recorded test results.
+
+## Project Documentation
+
+- [Implementation Guide](docs/implementation-guide.md)
+- [Lessons Learned](docs/lessons-learned.md)
+- [Validation Results](tests/validation-results.md)
+- [Deployment Files](deployment/)
 ## Project Status
 
 ✅ **Completed** – The architecture has been designed, deployed, tested and documented.
